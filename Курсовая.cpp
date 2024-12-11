@@ -7,12 +7,42 @@
 using namespace std;
 using namespace std::chrono;
 
+// **Класс "Совпадение"**
+class Match {
+public:
+    int position;        // Позиция совпадения
+    double matchPercent; // Процент совпадения (0-100)
+    bool isFullMatch;    // Полное совпадение или частичное
+
+    Match(int pos, double percent, bool fullMatch)
+        : position(pos), matchPercent(percent), isFullMatch(fullMatch) {}
+
+    void print() const {
+        cout << "Position: " << position
+             << ", Match Percent: " << matchPercent
+             << "%, Full Match: " << (isFullMatch ? "Yes" : "No") << endl;
+    }
+};
+
+// **Функция для получения фрагмента текста вокруг совпадения**
+string getCompactFragment(const string& text, int position, int matchLength, int contextSize = 10) {
+    int start = max(0, position - contextSize); // Начало фрагмента
+    int end = min((int)text.size(), position + matchLength + contextSize); // Конец фрагмента
+
+    string fragment = text.substr(start, end - start);
+    // Добавляем квадратные скобки вокруг найденного совпадения
+    fragment.insert(position - start, "[");
+    fragment.insert(position - start + matchLength + 1, "]");
+
+    return fragment;
+}
+
 // **Алгоритм Рабина-Карпа**
-vector<int> rabinKarp(const string& text, const string& pattern) {
+vector<Match> rabinKarp(const string& text, const string& pattern) {
     const int PRIME = 101;
     int n = text.size();
     int m = pattern.size();
-    vector<int> result;
+    vector<Match> matches;
     long long patternHash = 0, textHash = 0, power = 1;
 
     for (int i = 0; i < m - 1; i++) power = (power * PRIME);
@@ -22,182 +52,152 @@ vector<int> rabinKarp(const string& text, const string& pattern) {
     }
 
     for (int i = 0; i <= n - m; i++) {
-        if (patternHash == textHash && text.substr(i, m) == pattern) {
-            result.push_back(i);
+        if (patternHash == textHash) {
+            int matchCount = 0;
+            for (int j = 0; j < m; j++) {
+                if (text[i + j] == pattern[j]) matchCount++;
+            }
+            double matchPercent = (matchCount * 100.0) / m;
+            bool isFullMatch = (matchCount == m);
+            matches.emplace_back(i, matchPercent, isFullMatch);
         }
         if (i < n - m) {
             textHash = (textHash - text[i] * power) * PRIME + text[i + m];
         }
     }
-    return result;
+    return matches;
 }
 
 // **Алгоритм Кнута-Морриса-Пратта (КМП)**
-vector<int> knuthMorrisPratt(const string& text, const string& pattern) {
+vector<Match> knuthMorrisPratt(const string& text, const string& pattern) {
     int n = text.size(), m = pattern.size();
-    vector<int> result, lps(m, 0);
-    int j = 0;
+    vector<Match> matches;
+    vector<int> lps(m, 0); // Это таблица lps
 
+    // Построение таблицы lps
+    int j = 0;
     for (int i = 1; i < m; i++) {
         while (j > 0 && pattern[i] != pattern[j]) j = lps[j - 1];
-        if (pattern[i] == pattern[j]) lps[i] = ++j;
+        if (pattern[i] == pattern[j]) j++;
+        lps[i] = j;
     }
 
+    // Поиск совпадений
     j = 0;
     for (int i = 0; i < n; i++) {
         while (j > 0 && text[i] != pattern[j]) j = lps[j - 1];
         if (text[i] == pattern[j]) j++;
         if (j == m) {
-            result.push_back(i - m + 1);
+            matches.emplace_back(i - m + 1, 100.0, true); // Полное совпадение
             j = lps[j - 1];
         }
     }
-    return result;
+    return matches;
 }
 
-// **Улучшенный алгоритм Бойера-Мура**
-unordered_map<char, int> badCharacterTable(const string& pattern) {
-    unordered_map<char, int> table;
-    int m = pattern.size();
+// **Алгоритм Бойера-Мура**
+vector<Match> boyerMoore(const string& text, const string& pattern) {
+    int n = text.size(), m = pattern.size();
+    vector<Match> matches;
+
+    if (m > n) return matches;
+
+    unordered_map<char, int> badChar;
     for (int i = 0; i < m; i++) {
-        table[pattern[i]] = i;
+        badChar[pattern[i]] = i;
     }
-    return table;
+
+    int shift = 0;
+    while (shift <= n - m) {
+        int j = m - 1;
+
+        while (j >= 0 && pattern[j] == text[shift + j]) {
+            j--;
+        }
+
+        if (j < 0) {
+            matches.emplace_back(shift, 100.0, true);
+            shift += (shift + m < n) ? m - badChar[text[shift + m]] : 1;
+        } else {
+            shift += max(1, j - badChar[text[shift + j]]);
+        }
+    }
+    return matches;
 }
 
-vector<int> goodSuffixTable(const string& pattern) {
-    int m = pattern.size();
-    vector<int> table(m + 1, m);
-    vector<int> border(m + 1, 0);
-
-    int j = m;
-    border[m] = j;
-    for (int i = m - 1; i >= 0; i--) {
-        while (j < m && pattern[i] != pattern[j]) {
-            if (table[j] == m) {
-                table[j] = m - i - 1;
-            }
-            j = border[j];
-        }
-        j--;
-        border[i] = j;
+// **Вывод совпадений с компактным контекстом**
+void printMatchesWithCompactContext(const vector<Match>& matches, const string& text, int matchLength) {
+    for (const auto& match : matches) {
+        match.print();
+        string fragment = getCompactFragment(text, match.position, matchLength);
+        cout << "Context: " << fragment << endl;
     }
-
-    for (int i = 0; i < m; i++) {
-        if (table[i] == m) {
-            table[i] = m - j - 1;
-        }
-        j = border[j];
-    }
-
-    return table;
 }
 
-std::vector<int> computePrefixFunction(const std::string& s) {
-    std::vector<int> p(s.length());
-    int k = 0;
-    p[0] = 0;
-    for (size_t i = 1; i < s.length(); ++i) {
-        while (k > 0 && s[k] != s[i]) {
-            k = p[k - 1];
-        }
-        if (s[k] == s[i]) {
-            ++k;
-        }
-        p[i] = k;
-    }
-    return p;
-}
-
-// Функция для поиска подстроки t в строке s с использованием алгоритма Бойера-Мура
-int boyerMoore(const std::string& s, const std::string& t) {
-    if (t.empty()) {
-        return 0; // Пустой шаблон всегда "находится" в начале строки
-    }
-    if (s.length() < t.length()) {
-        return -1; // Шаблон длиннее строки, поиск невозможен
-    }
-
-    // Построение таблицы стоп-символов
-    std::unordered_map<char, int> stopTable;
-    for (size_t i = 0; i < t.length(); ++i) {
-        stopTable[t[i]] = i;
-    }
-
-    // Построение таблицы суффиксов
-    std::string rt(t.rbegin(), t.rend());
-    std::vector<int> p = computePrefixFunction(t);
-    std::vector<int> pr = computePrefixFunction(rt);
-    std::vector<int> suffixTable(t.length() + 1, t.length() - p.back());
-    for (size_t i = 1; i < t.length(); ++i) {
-        int j = pr[i];
-        suffixTable[j] = std::min(suffixTable[j], static_cast<int>(i - pr[i] + 1));
-    }
-
-    // Поиск подстроки
-    for (size_t shift = 0; shift <= s.length() - t.length();) {
-        int pos = t.length() - 1;
-        while (t[pos] == s[shift + pos]) {
-            if (pos == 0) {
-                return shift; // Найдено совпадение
-            }
-            --pos;
-        }
-        int stopShift = pos - (stopTable.count(s[shift + pos]) ? stopTable[s[shift + pos]] : -1);
-        int suffixShift = suffixTable[t.length() - pos - 1];
-        shift += std::max(stopShift, suffixShift);
-    }
-    return -1; // Совпадение не найдено
-}
-// **Тесты производительности**
-void testPerformance(const string& text, const string& pattern) {
-    cout << "\n--- Testing Performance ---" << endl;
+// **Тест производительности**
+void testPerformanceWithCompactContext(const string& text, const string& pattern) {
+    cout << "\n--- Testing Performance with Compact Context ---" << endl;
 
     // Рабин-Карп
     auto start = high_resolution_clock::now();
-    rabinKarp(text, pattern);
+    auto matchesRK = rabinKarp(text, pattern);
     auto end = high_resolution_clock::now();
     cout << "Rabin-Karp Duration: " << duration_cast<microseconds>(end - start).count() << " microseconds" << endl;
+    printMatchesWithCompactContext(matchesRK, text, pattern.size());
 
     // Кнут-Моррис-Пратт
     start = high_resolution_clock::now();
-    knuthMorrisPratt(text, pattern);
+    auto matchesKMP = knuthMorrisPratt(text, pattern);
     end = high_resolution_clock::now();
-    cout << "KMP Duration: " << duration_cast<microseconds>(end - start).count() << " microseconds" << endl;
+    cout << "Knuth-Morris-Pratt Duration: " << duration_cast<microseconds>(end - start).count() << " microseconds" << endl;
+    printMatchesWithCompactContext(matchesKMP, text, pattern.size());
 
     // Бойера-Мура
     start = high_resolution_clock::now();
-    boyerMoore(text, pattern);
+    auto matchesBM = boyerMoore(text, pattern);
     end = high_resolution_clock::now();
     cout << "Boyer-Moore Duration: " << duration_cast<microseconds>(end - start).count() << " microseconds" << endl;
+    printMatchesWithCompactContext(matchesBM, text, pattern.size());
 }
 
 int main() {
-    // Тест 1: Маленький текст
-    string text = "aaaaa";
-    string pattern = "aaa";
-    testPerformance(text, pattern);
+    // Пример текста и шаблона
+    string text = "This is a simple test example with some errors and a test.";
+    string pattern = "test";
 
-    // Тест 2: Текст с длинным шаблоном
-    text = "This is a simple test string for Boyer-Moore algorithm.";
-    pattern = "Boyer-Moore";
-    testPerformance(text, pattern);
+    cout << "=== Test 1: Basic Example ===" << endl;
+    testPerformanceWithCompactContext(text, pattern);
 
-    // Тест 3: Большой текст с несколькими совпадениями
-    text = string(10000, 'a') + "test" + string(100, 'a') + "test" + string(10000, 'b');
-    pattern = "test";
-    testPerformance(text, pattern);
-
-    // Тест 4: Текст без совпадений
-    text = string(20000, 'a');
-    pattern = "test";
-    testPerformance(text, pattern);
-
-    // Тест 5: Очень большой текст
-    std::string text1(1000000, 'a');
-    text1.replace(500000, 6, "pattern");
+    // Очень большой текст
+    cout << "\n=== Test 2: Very Large Text with One Match ===" << endl;
+    string largeText(1000000, 'a');
+    largeText.replace(500000, 6, "pattern");
     pattern = "pattern";
-    testPerformance(text1, pattern);
+    testPerformanceWithCompactContext(largeText, pattern);
+
+    // Текст с множественными совпадениями
+    cout << "\n=== Test 3: Text with Multiple Matches ===" << endl;
+    string multipleMatchesText = "test test test test";
+    pattern = "test";
+    testPerformanceWithCompactContext(multipleMatchesText, pattern);
+
+    // Частичное совпадение (неполное соответствие)
+    cout << "\n=== Test 4: Text with Partial Matches ===" << endl;
+    string partialText = "testing testy testers test";
+    pattern = "test";
+    testPerformanceWithCompactContext(partialText, pattern);
+
+    // Нет совпадений
+    cout << "\n=== Test 5: Text with No Matches ===" << endl;
+    string noMatchText = "completely unrelated text with no pattern";
+    pattern = "pattern";
+    testPerformanceWithCompactContext(noMatchText, pattern);
+
+    // Маленький шаблон в большом тексте
+    cout << "\n=== Test 6: Small Pattern in Large Text ===" << endl;
+    string smallPatternText = string(500000, 'x') + "a" + string(500000, 'x');
+    pattern = "a";
+    testPerformanceWithCompactContext(smallPatternText, pattern);
 
     return 0;
 }
